@@ -2,6 +2,7 @@ import { Ellipsis, LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { Link, useNavigate } from "react-router";
+import axios from "axios";
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -12,69 +13,59 @@ const Dashboard = () => {
   const [user, setUser] = useState(null);
   const dropdownRef = useRef(null);
 
-  // API Base URL
-  const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api`;
+  const API_BASE_URL = "http://localhost:8000/api";
 
-  // Get token from localStorage
-  const getToken = () => {
-    return localStorage.getItem("token");
-  };
+  const getToken = () => localStorage.getItem("token");
 
-  // Get user from localStorage
   const getUser = () => {
     const userData = localStorage.getItem("user");
     return userData ? JSON.parse(userData) : null;
   };
 
-  // API Headers
   const getHeaders = () => ({
     "Content-Type": "application/json",
     Authorization: `Bearer ${getToken()}`,
   });
 
-  // Fetch Tasks from API
   const fetchTasks = async (search = "") => {
     setLoading(true);
     try {
       const queryParam = search ? `?search=${encodeURIComponent(search)}` : "";
-      const response = await fetch(`${API_BASE_URL}/tasks${queryParam}`, {
-        method: "GET",
+      const response = await axios.get(`${API_BASE_URL}/tasks${queryParam}`, {
         headers: getHeaders(),
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
-        setTasklist(result.data.data || result.data || []); // Handle pagination
+        setTasklist(result.data.data || result.data || []);
       } else {
         console.error("Failed to fetch tasks:", result.message);
-        // If unauthorized, redirect to login
         if (response.status === 401) {
           handleLogout();
         }
       }
     } catch (error) {
       console.error("Error fetching tasks:", error);
+      if (error.response?.status === 401) {
+        handleLogout();
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Handle Status Change
   const handleStatusChange = async (taskId, newStatus) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks/${taskId}/status`, {
-        method: "PATCH",
-        headers: getHeaders(),
-        body: JSON.stringify({
-          status: newStatus,
-        }),
-      });
+      const response = await axios.patch(
+        `${API_BASE_URL}/tasks/${taskId}/status`,
+        { status: newStatus },
+        { headers: getHeaders() }
+      );
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
-        // Update local state
         setTasklist((prevTasks) =>
           prevTasks.map((task) =>
             task.id === taskId ? { ...task, status: newStatus } : task
@@ -89,22 +80,17 @@ const Dashboard = () => {
     }
   };
 
-  // Handle Delete Task
   const handleDeleteTask = async (taskId) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus task ini?")) {
-      return;
-    }
+    if (!confirm("Apakah Anda yakin ingin menghapus task ini?")) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
-        method: "DELETE",
+      const response = await axios.delete(`${API_BASE_URL}/tasks/${taskId}`, {
         headers: getHeaders(),
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
-        // Remove from local state
         setTasklist((prevTasks) =>
           prevTasks.filter((task) => task.id !== taskId)
         );
@@ -118,42 +104,111 @@ const Dashboard = () => {
     }
   };
 
-  // Handle Logout
   const handleLogout = async () => {
     try {
-      await fetch(`${API_BASE_URL}/logout`, {
-        method: "POST",
-        headers: getHeaders(),
-      });
+      await axios.post(`${API_BASE_URL}/logout`, {}, { headers: getHeaders() });
     } catch (error) {
       console.error("Logout error:", error);
     } finally {
-      // Clear localStorage
       localStorage.removeItem("token");
-      localStorage.removeItem("user");
-      // Redirect to login
+      localStorage.removeUser("user");
       navigate("/login");
     }
   };
 
-  // Handle Search
   const handleSearch = (e) => {
     const value = e.target.value;
     setSearchTerm(value);
 
-    // Debounce search
     clearTimeout(window.searchTimeout);
     window.searchTimeout = setTimeout(() => {
       fetchTasks(value);
     }, 500);
   };
 
-  // Toggle Dropdown
   const toggleDropdown = (index) => {
     setOpenDropdown(openDropdown === index ? null : index);
   };
 
-  // Click outside to close dropdown
+  // Fungsi untuk menghitung waktu tersisa yang lebih akurat
+  const calculateRemainingDays = (deadline) => {
+    if (!deadline) return "Tanggal tidak valid";
+
+    // Pastikan deadline diset ke akhir hari (23:59:59)
+    const now = dayjs();
+    const end = dayjs(deadline).endOf("day"); // Set ke 23:59:59
+
+    if (!end.isValid()) return "Format tanggal tidak valid";
+
+    const diffInMinutes = end.diff(now, "minute");
+    const diffInHours = end.diff(now, "hour");
+    const diffInDays = end.diff(now, "day");
+
+    if (diffInMinutes < 0) {
+      // Task sudah lewat deadline
+      const pastMinutes = Math.abs(diffInMinutes);
+      const pastHours = Math.abs(diffInHours);
+      const pastDays = Math.abs(diffInDays);
+
+      if (pastDays > 0) {
+        const remainingHours = pastHours % 24;
+        return remainingHours > 0
+          ? `Terlambat ${pastDays} hari ${remainingHours} jam`
+          : `Terlambat ${pastDays} hari`;
+      } else if (pastHours > 0) {
+        const remainingMinutes = pastMinutes % 60;
+        return remainingMinutes > 0
+          ? `Terlambat ${pastHours} jam ${remainingMinutes} menit`
+          : `Terlambat ${pastHours} jam`;
+      } else {
+        return `Terlambat ${pastMinutes} menit`;
+      }
+    }
+
+    // Task belum melewati deadline
+    if (diffInDays > 0) {
+      const remainingHours = diffInHours % 24;
+      return remainingHours > 0
+        ? `${diffInDays} hari ${remainingHours} jam lagi`
+        : `${diffInDays} hari lagi`;
+    } else {
+      if (diffInHours > 0) {
+        const remainingMinutes = diffInMinutes % 60;
+        return remainingMinutes > 0
+          ? `${diffInHours} jam ${remainingMinutes} menit lagi`
+          : `${diffInHours} jam lagi`;
+      } else {
+        return diffInMinutes > 0
+          ? `${diffInMinutes} menit lagi`
+          : "Deadline hari ini";
+      }
+    }
+  };
+
+  // Fungsi untuk format deadline yang konsisten
+  const formatDeadline = (deadline) => {
+    if (!deadline) return "Tidak ada deadline";
+
+    const date = dayjs(deadline);
+    if (!date.isValid()) return "Format tanggal tidak valid";
+
+    return date.format("DD/MM/YYYY");
+  };
+
+  // Fungsi untuk menentukan warna berdasarkan status waktu tersisa
+  const getTimeRemainingColor = (deadline) => {
+    if (!deadline) return "text-gray-500";
+
+    const now = dayjs();
+    const end = dayjs(deadline).endOf("day");
+    const diffInHours = end.diff(now, "hour");
+
+    if (diffInHours < 0) return "text-red-600"; // Terlambat
+    if (diffInHours <= 24) return "text-orange-500"; // Kurang dari 1 hari
+    if (diffInHours <= 72) return "text-yellow-500"; // Kurang dari 3 hari
+    return "text-green-600"; // Masih aman
+  };
+
   useEffect(() => {
     const handleClickOutside = (event) => {
       const dropdowns = document.querySelectorAll(".dropdown-menu");
@@ -176,7 +231,6 @@ const Dashboard = () => {
     };
   }, []);
 
-  // Initial load
   useEffect(() => {
     const token = getToken();
     const userData = getUser();
@@ -189,173 +243,6 @@ const Dashboard = () => {
     setUser(userData);
     fetchTasks();
   }, [navigate]);
-
-  const calculateRemainingDays = (deadline) => {
-    if (!deadline) return "Tanggal tidak valid";
-
-    const now = dayjs();
-    const end = dayjs(deadline);
-
-    if (!end.isValid()) return "Format tanggal tidak valid";
-
-    const diffInMinutes = end.diff(now, "minute");
-    const diffInHours = end.diff(now, "hour");
-    const diffInDays = end.diff(now, "day");
-
-    // Jika sudah lewat
-    if (diffInMinutes < 0) {
-      const pastMinutes = Math.abs(diffInMinutes);
-      const pastHours = Math.abs(diffInHours);
-      const pastDays = Math.abs(diffInDays);
-
-      if (pastDays > 0) {
-        const remainingHours = pastHours % 24;
-        if (remainingHours > 0) {
-          return `Sudah lewat ${pastDays} hari ${remainingHours} jam`;
-        }
-        return `Sudah lewat ${pastDays} hari`;
-      } else if (pastHours > 0) {
-        const remainingMinutes = pastMinutes % 60;
-        if (remainingMinutes > 0) {
-          return `Sudah lewat ${pastHours} jam ${remainingMinutes} menit`;
-        }
-        return `Sudah lewat ${pastHours} jam`;
-      } else {
-        return `Sudah lewat ${pastMinutes} menit`;
-      }
-    }
-
-    // Jika masih akan datang
-    if (diffInDays > 0) {
-      const remainingHours = diffInHours % 24;
-      if (remainingHours > 0) {
-        return `${diffInDays} hari ${remainingHours} jam lagi`;
-      }
-      return `${diffInDays} hari lagi`;
-    } else {
-      // Hari ini
-      if (diffInHours > 0) {
-        const remainingMinutes = diffInMinutes % 60;
-        if (remainingMinutes > 0) {
-          return `${diffInHours} jam ${remainingMinutes} menit lagi`;
-        }
-        return `${diffInHours} jam lagi`;
-      } else {
-        return `${diffInMinutes} menit lagi`;
-      }
-    }
-  };
-
-  // Format remaining days dari API atau hitung sendiri dengan detail jam
-  const formatRemainingDays = (task) => {
-    if (task.remaining_days !== undefined && task.remaining_days !== null) {
-      // Jika API memberikan data dalam format number (dalam hari)
-      if (typeof task.remaining_days === "number") {
-        // Hitung ulang berdasarkan deadline sampai 23:59
-        const now = dayjs();
-        const end = dayjs(task.deadline).hour(23).minute(59).second(59);
-        const diffInMinutes = end.diff(now, "minute");
-        const diffInHours = end.diff(now, "hour");
-        const diffInDays = end.diff(now, "day");
-
-        if (diffInMinutes < 0) {
-          const pastMinutes = Math.abs(diffInMinutes);
-          const pastHours = Math.abs(diffInHours);
-          const pastDays = Math.abs(diffInDays);
-
-          if (pastDays > 0) {
-            const remainingHours = pastHours % 24;
-            return remainingHours > 0
-              ? `Sudah lewat ${pastDays} hari ${remainingHours} jam`
-              : `Sudah lewat ${pastDays} hari`;
-          } else if (pastHours > 0) {
-            const remainingMinutes = pastMinutes % 60;
-            return remainingMinutes > 0
-              ? `Sudah lewat ${pastHours} jam ${remainingMinutes} menit`
-              : `Sudah lewat ${pastHours} jam`;
-          } else {
-            return `Sudah lewat ${pastMinutes} menit`;
-          }
-        }
-
-        if (diffInDays > 0) {
-          const remainingHours = diffInHours % 24;
-          return remainingHours > 0
-            ? `${diffInDays} hari ${remainingHours} jam lagi`
-            : `${diffInDays} hari lagi`;
-        } else {
-          if (diffInHours > 0) {
-            const remainingMinutes = diffInMinutes % 60;
-            return remainingMinutes > 0
-              ? `${diffInHours} jam ${remainingMinutes} menit lagi`
-              : `${diffInHours} jam lagi`;
-          } else {
-            return `${diffInMinutes} menit lagi`;
-          }
-        }
-      }
-
-      // Jika API memberikan data dalam format string
-      if (typeof task.remaining_days === "string") {
-        // Cek apakah sudah dalam format yang detail
-        if (
-          task.remaining_days.includes("jam") ||
-          task.remaining_days.includes("menit")
-        ) {
-          return task.remaining_days;
-        }
-
-        // Coba parse sebagai number dan hitung ulang dengan deadline 23:59
-        const parsed = parseFloat(task.remaining_days);
-        if (!isNaN(parsed)) {
-          const now = dayjs();
-          const end = dayjs(task.deadline).hour(23).minute(59).second(59);
-          const diffInMinutes = end.diff(now, "minute");
-          const diffInHours = end.diff(now, "hour");
-          const diffInDays = end.diff(now, "day");
-
-          if (diffInMinutes < 0) {
-            const pastMinutes = Math.abs(diffInMinutes);
-            const pastHours = Math.abs(diffInHours);
-            const pastDays = Math.abs(diffInDays);
-
-            if (pastDays > 0) {
-              const remainingHours = pastHours % 24;
-              return remainingHours > 0
-                ? `Sudah lewat ${pastDays} hari ${remainingHours} jam`
-                : `Sudah lewat ${pastDays} hari`;
-            } else if (pastHours > 0) {
-              const remainingMinutes = pastMinutes % 60;
-              return remainingMinutes > 0
-                ? `Sudah lewat ${pastHours} jam ${remainingMinutes} menit`
-                : `Sudah lewat ${pastHours} jam`;
-            } else {
-              return `Sudah lewat ${pastMinutes} menit`;
-            }
-          }
-
-          if (diffInDays > 0) {
-            const remainingHours = diffInHours % 24;
-            return remainingHours > 0
-              ? `${diffInDays} hari ${remainingHours} jam lagi`
-              : `${diffInDays} hari lagi`;
-          } else {
-            if (diffInHours > 0) {
-              const remainingMinutes = diffInMinutes % 60;
-              return remainingMinutes > 0
-                ? `${diffInHours} jam ${remainingMinutes} menit lagi`
-                : `${diffInHours} jam lagi`;
-            } else {
-              return `${diffInMinutes} menit lagi`;
-            }
-          }
-        }
-      }
-    }
-
-    // Fallback ke perhitungan manual dengan deadline 23:59
-    return calculateRemainingDays(task.deadline);
-  };
 
   return (
     <div className="relative min-h-screen">
@@ -443,19 +330,16 @@ const Dashboard = () => {
                     <td className="px-6 py-3">{task.tasklist}</td>
                     <td className="px-6 py-3">{task.description}</td>
                     <td className="px-6 py-3">
-                      {dayjs(task.deadline).format("DD/MM/YYYY")}
-                      <div className="text-xs">(sampai 23:59)</div>
+                      {formatDeadline(task.deadline)}
+                      <div className="text-xs text-gray-500">
+                        (sampai 23:59)
+                      </div>
                     </td>
-                    {/* <td className="px-6 py-3">
-                      {calculateRemainingDays(task.deadline)}
-                    </td> */}
                     <td className="px-6 py-3">
-                      {/* {task.remaining_days
-                        ? `${Math.floor(parseFloat(task.remaining_days))} hari lagi`
-                        : calculateRemainingDays(task.deadline)} */}
-                      {/* {formatRemainingDays(task)} */}
-                      <span className="text-sm">
-                        {formatRemainingDays(task)}
+                      <span
+                        className={`text-sm font-medium ${getTimeRemainingColor(task.deadline)}`}
+                      >
+                        {calculateRemainingDays(task.deadline)}
                       </span>
                     </td>
                     <td className="px-6 py-3">

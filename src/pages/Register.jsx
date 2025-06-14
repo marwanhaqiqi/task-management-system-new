@@ -1,3 +1,4 @@
+import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -17,7 +18,7 @@ const Register = () => {
   const [loading, setLoading] = useState(false);
 
   // API Base URL
-  const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api`;
+  const API_BASE_URL = "http://localhost:8000/api";
 
   const togglePasswordVisible = () => setIsPasswordVisible((prev) => !prev);
   const toggleRetypePasswordVisible = () =>
@@ -26,7 +27,6 @@ const Register = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
 
-    // Validate password match
     if (password !== retypePassword) {
       alert("Password tidak cocok!");
       return;
@@ -35,29 +35,28 @@ const Register = () => {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name,
-          email,
-          password,
-        }),
+      const response = await axios.post(`${API_BASE_URL}/register`, {
+        name,
+        email,
+        password,
       });
 
-      const result = await response.json();
-
-      if (result.success) {
+      if (response.data.success) {
         alert("Registrasi berhasil! Silahkan login.");
         navigate("/login");
       } else {
-        alert("Registrasi gagal: " + result.message);
+        alert("Registrasi gagal: " + response.data.message);
       }
     } catch (error) {
       console.error("Register error:", error);
-      alert("Terjadi kesalahan saat registrasi");
+      if (error.response?.data?.errors) {
+        const messages = Object.values(error.response.data.errors)
+          .flat()
+          .join("\n");
+        alert("Registrasi gagal:\n" + messages);
+      } else {
+        alert("Terjadi kesalahan saat registrasi");
+      }
     } finally {
       setLoading(false);
     }
@@ -65,7 +64,7 @@ const Register = () => {
 
   return (
     <div className="relative min-h-screen flex justify-center items-center overflow-hidden">
-      {/* Video background */}
+      {/* Background video */}
       <video
         autoPlay
         loop
@@ -76,7 +75,6 @@ const Register = () => {
         type="video/mp4"
       />
 
-      {/* Register form content */}
       <div className="relative z-10 flex flex-col gap-6 shadow-2xl bg-opacity-80 p-8 rounded-md max-w-md w-full">
         <div>
           <h1 className="text-white mb-3 font-bold text-2xl">Register</h1>
@@ -84,7 +82,7 @@ const Register = () => {
             Silahkan Masukkan User Email dan Password Anda!
           </p>
         </div>
-        <div className="flex flex-col gap-4">
+        <form onSubmit={handleRegister} className="flex flex-col gap-4">
           <div>
             <label
               htmlFor="username"
@@ -186,14 +184,13 @@ const Register = () => {
             </Link>
           </div>
           <button
-            type="button"
-            onClick={handleRegister}
+            type="submit"
             disabled={loading}
             className="mt-2 w-full font-medium text-center py-3 bg-black text-white rounded-md active:scale-90 hover:opacity-80 transition-all duration-200 cursor-pointer disabled:opacity-50"
           >
             {loading ? "Loading..." : "Register"}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

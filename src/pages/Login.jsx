@@ -1,3 +1,4 @@
+import axios from "axios";
 import { Eye, EyeOff } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -9,8 +10,7 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api`;
-
+  const API_BASE_URL = "http://localhost:8000/api";
   const togglePasswordVisible = () => setIsPasswordVisible((prev) => !prev);
 
   const handleLogin = async (e) => {
@@ -18,32 +18,30 @@ const Login = () => {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email,
-          password,
-        }),
+      const response = await axios.post(`${API_BASE_URL}/login`, {
+        email,
+        password,
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
-        // Store token and user data
+        // Simpan token dan data user ke localStorage
         localStorage.setItem("token", result.data.token);
         localStorage.setItem("user", JSON.stringify(result.data.user));
 
-        // Navigate to dashboard
+        // Arahkan ke dashboard
         navigate("/dashboard");
       } else {
-        alert("Login failed: " + result.message);
+        alert("Login gagal: " + result.message);
       }
     } catch (error) {
       console.error("Login error:", error);
-      alert("Login error occurred");
+      if (error.response?.data?.message) {
+        alert("Login gagal: " + error.response.data.message);
+      } else {
+        alert("Terjadi kesalahan saat login");
+      }
     } finally {
       setLoading(false);
     }
@@ -70,7 +68,7 @@ const Login = () => {
             Silahkan Masukkan Email dan Password Anda!
           </p>
         </div>
-        <div className="flex flex-col gap-4">
+        <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <div>
             <label
               htmlFor="email"
@@ -125,14 +123,13 @@ const Login = () => {
             </Link>
           </div>
           <button
-            type="button"
-            onClick={handleLogin}
+            type="submit"
             disabled={loading}
             className="mt-2 w-full font-medium text-center py-3 bg-black text-white rounded-md active:scale-90 hover:opacity-80 transition-all duration-200 cursor-pointer disabled:opacity-50"
           >
             {loading ? "Loading..." : "Login"}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

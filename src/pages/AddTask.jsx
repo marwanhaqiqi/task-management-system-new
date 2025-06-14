@@ -1,9 +1,10 @@
+import axios from "axios";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 
 const AddTasklist = () => {
   const navigate = useNavigate();
-  const { taskId } = useParams(); // <-- untuk cek mode edit
+  const { taskId } = useParams(); // Cek apakah mode edit
   const isEditMode = !!taskId;
 
   const [tasklist, setTasklist] = useState("");
@@ -12,8 +13,7 @@ const AddTasklist = () => {
   const [status, setStatus] = useState("pending");
   const [loading, setLoading] = useState(false);
 
-  const API_BASE_URL = `${import.meta.env.VITE_API_URL}/api`;
-
+  const API_BASE_URL = "http://localhost:8000/api";
   const getToken = () => localStorage.getItem("token");
 
   const getHeaders = () => ({
@@ -21,55 +21,136 @@ const AddTasklist = () => {
     Authorization: `Bearer ${getToken()}`,
   });
 
-  // Fetch task data kalau edit
+  // Fungsi untuk format tanggal dari backend ke format input date
+  const formatDateForInput = (dateString) => {
+    if (!dateString) return "";
+
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return "";
+
+      // Format ke YYYY-MM-DD untuk input type="date"
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+
+      return `${year}-${month}-${day}`;
+    } catch (error) {
+      console.error("Error formatting date:", error);
+      return "";
+    }
+  };
+
+  // Fungsi untuk format tanggal dari input ke format backend
+  const formatDateForBackend = (dateString) => {
+    if (!dateString) return null;
+
+    try {
+      // Buat date object dengan timezone lokal dan set ke akhir hari
+      const date = new Date(dateString + "T23:59:59.999");
+
+      // Return dalam format ISO string atau sesuai kebutuhan backend
+      return date.toISOString();
+    } catch (error) {
+      console.error("Error formatting date for backend:", error);
+      return null;
+    }
+  };
+
+  // Fetch data task saat mode edit
   const fetchTask = async () => {
     if (!taskId) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
-        method: "GET",
+      const response = await axios.get(`${API_BASE_URL}/tasks/${taskId}`, {
         headers: getHeaders(),
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
         const task = result.data;
-        setTasklist(task.tasklist);
-        setDescription(task.description);
-        setDeadline(task.deadline);
-        setStatus(task.status);
+        setTasklist(task.tasklist || "");
+        setDescription(task.description || "");
+        setDeadline(formatDateForInput(task.deadline));
+        setStatus(task.status || "pending");
       } else {
-        alert("Gagal mengambil data task");
+        alert("Gagal mengambil data task: " + result.message);
         navigate("/dashboard");
       }
     } catch (error) {
       console.error("Error fetching task:", error);
-      alert("Terjadi kesalahan");
+      alert("Terjadi kesalahan saat mengambil task");
       navigate("/dashboard");
     }
   };
 
   useEffect(() => {
+    // Cek authentication
+    const token = getToken();
+    if (!token) {
+      navigate("/login");
+      return;
+    }
+
     if (isEditMode) {
       fetchTask();
     }
-  }, [taskId]);
+  }, [taskId, isEditMode, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+
+    // Validasi input
+    if (!tasklist.trim()) {
+      alert("Tasklist tidak boleh kosong");
+      setLoading(false);
+      return;
+    }
+
+    if (!description.trim()) {
+      alert("Deskripsi tidak boleh kosong");
+      setLoading(false);
+      return;
+    }
+
+    if (!deadline) {
+      alert("Deadline tidak boleh kosong");
+      setLoading(false);
+      return;
+    }
+
+    // Validasi deadline tidak boleh di masa lalu (kecuali saat edit)
+    if (!isEditMode) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const selectedDate = new Date(deadline);
+
+      if (selectedDate < today) {
+        alert("Deadline tidak boleh di masa lalu");
+        setLoading(false);
+        return;
+      }
+    }
 
     const method = isEditMode ? "PUT" : "POST";
     const endpoint = isEditMode
       ? `${API_BASE_URL}/tasks/${taskId}`
       : `${API_BASE_URL}/tasks`;
 
+    const requestData = {
+      tasklist: tasklist.trim(),
+      description: description.trim(),
+      deadline: formatDateForBackend(deadline),
+      status: status,
+    };
+
     try {
       const response = await fetch(endpoint, {
         method,
         headers: getHeaders(),
-        body: JSON.stringify({ tasklist, description, deadline, status }),
+        body: JSON.stringify(requestData),
       });
 
       const result = await response.json();
@@ -78,7 +159,7 @@ const AddTasklist = () => {
         alert(`Task berhasil ${isEditMode ? "diedit" : "ditambahkan"}!`);
         navigate("/dashboard");
       } else {
-        alert("Gagal menyimpan task: " + result.message);
+        alert("Gagal menyimpan task: " + (result.message || "Unknown error"));
       }
     } catch (error) {
       console.error("Error submitting task:", error);
@@ -86,6 +167,10 @@ const AddTasklist = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCancel = () => {
+    navigate(-1);
   };
 
   return (
@@ -105,7 +190,7 @@ const AddTasklist = () => {
             {isEditMode ? "Edit Tasklist" : "Tambah Tasklist"}
           </h2>
           <button
-            onClick={() => navigate(-1)}
+            onClick={handleCancel}
             className="text-gray-600 hover:text-black cursor-pointer"
           >
             ✖
@@ -196,7 +281,7 @@ const AddTasklist = () => {
           <div className="flex justify-between mt-4">
             <button
               type="button"
-              onClick={() => navigate(-1)}
+              onClick={handleCancel}
               className="px-4 py-2 rounded-md border hover:opacity-80 transition-all duration-200 focus:scale-95 cursor-pointer"
             >
               Batal
